@@ -18,6 +18,7 @@
 
 #include <avr/io.h>
 #include <util/delay.h>
+#include <avr/interrupt.h>
 
 #include "iox.h"
 #include "uart.h"
@@ -28,10 +29,19 @@
 #define HANDSHAKE_PORT PORTD
 #define HANDSHAKE_PIN PIND
 
+#define CLOCK_PORT PORTB
+#define CLOCK_PIN  PINB
+#define CLOCK_DDR  DDRB
+
 #define KBD_READY 2
 #define VIDEO_DA 3
 #define KBD_STROBE 4
 #define VIDEO_RDA 5
+
+#define RESET_OUT 7 // PD7
+#define RESET_IN 0  // PB0
+#define CLOCK_OUT 1 // PB1
+#define CLOCK_UNUSED 6 // PD6 must be input
 
 #define VIDEO_IODIR IODIRA0
 #define VIDEO_GPPU GPPUA0
@@ -45,25 +55,79 @@
 #define VIDEO_RDA_LO HANDSHAKE_PORT &= ~(1 << VIDEO_RDA)
 #define VIDEO_RDA_HI HANDSHAKE_PORT |= (1 << VIDEO_RDA)
 
+#define RESET_LO HANDSHAKE_PORT &= ~(1 << RESET_OUT)
+#define RESET_HI HANDSHAKE_PORT |= (1 << RESET_OUT)
+#define GET_RESETSW (CLOCK_PIN & (1 << RESET_IN))
+
 #define GET_KBD_READY (HANDSHAKE_PIN & (1 << KBD_READY))
 #define GET_VIDEO_DA (HANDSHAKE_PIN & (1 << VIDEO_DA))
 
 #define KBD_INTERRUPT_ENABLE 1
 #define KBD_SEND_TIMEOUT 23
 
+//#define DIVIDER 7  // divide 16 = 1MHz
+#define DIVIDER 3  // divide 8 = 2MHz
+
+void clock_init() {
+  // setup timer 0
+  TCCR1A = 0b01000000;  // toggle OC1A on compare match CTC mode (WGM11=0, WGM10=0)
+  TCCR1B = 0b00001001;  // WGN13 = ,0 WGM12=1, no prescaling
+  OCR1A = DIVIDER;  //
+}
+
+void interrupt_init() {
+  // setup pin change interrupt
+  PCMSK0 = (1 << PCINT0);
+  PCMSK1 = 0;
+  PCMSK2 = 0;
+  PCICR |= (1 << PCIE0); // enable PCINT0 (PB0)
+}
+
+void print_hello() {
+  char msg[] = "RC6502 Apple 1 Replica\n\r";
+  for (int i = 0; ; i++) {
+    if (msg[i] == '\0') {
+      return;
+    }
+    uart_putc(msg[i]);
+  }
+}
+
 void pia_init(void)
 {
     uart_init(BAUD);
-    uart_putc('!');
+    //uart_putc('!');
+    print_hello();
     iox_init();
 
-    HANDSHAKE_DDR |= (1 << KBD_STROBE) | (1 << VIDEO_RDA);
-    HANDSHAKE_DDR &= ~((1 << KBD_READY) | (1 << VIDEO_DA));
+    HANDSHAKE_DDR |= (1 << KBD_STROBE) | (1 << VIDEO_RDA) | (1 << RESET_OUT);
+    HANDSHAKE_DDR &= ~((1 << KBD_READY) | (1 << VIDEO_DA) | (1 << CLOCK_UNUSED));
 
+    CLOCK_DDR |= (1 << CLOCK_OUT);
+    CLOCK_DDR &= ~(1 << RESET_IN);
+    CLOCK_PORT |= (1 << RESET_IN); // PULL-UP PB0
+    clock_init();  // setup timer 0
+
+    RESET_HI;    // reset cpu
+    _delay_ms(600);
+    RESET_LO;
+
+    interrupt_init();
+    
     iox_write(0, VIDEO_IODIR, 0xFF);    // video input
     iox_write(0, VIDEO_GPPU, 0x80);     // pullup on bit 7
     iox_write(0, KBD_IODIR, 0x00);      // keyboard output
 }
+
+ISR(PCINT0_vect) {
+  if (!GET_RESETSW) {
+    RESET_HI;
+    _delay_ms(600);// perform 6502 reset
+  } else {
+    RESET_LO;
+  }
+}
+
 
 char map_to_ascii(int c) {
   /* Convert ESC key */
