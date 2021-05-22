@@ -1,4 +1,5 @@
 # Improved PIA Communicator for RC6502
+# integrated clock and reset vwersion
 
 This is an improved version of the [RC6502](https://github.com/tebl/RC6502-Apple-1-Replica) PIA communicator firmware for an Arduino Nano. It is based on the original [Arduino Sketch](https://github.com/tebl/RC6502-Apple-1-Replica/blob/master/RC6502%20Serial%20IO/pia_communicator/pia_communicator.ino) provided with the RC6502. I have replaced the Arduino serial library with buffered interrupt-based serial communications routines and removed all the unnecessary communication delays.  
 
